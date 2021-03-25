@@ -12,12 +12,11 @@ import cats.syntax.all._
 import scala.util.Random
 
 object PersistenceService {
-  def save(value: String, partition: Int): IO[Unit] =
+  def save(value: String, partition: Int): IO[Unit] = Random.nextInt match {
     // A random chance of failure is introduced to model an error during the saving.
-    if (Random.nextInt(21) > 2)
-      Logger.info(s"Saved $value from partition $partition to the repository")
-    else
-      IO.raiseError(new PersistenceServiceException(s"Unable to save $value from partition $partition"))
+    case x if x % 2 == 0 => IO.raiseError(new PersistenceServiceException(s"Unable to save $value from partition $partition"))
+    case _ => Log(s"Saved $value from partition $partition to the repository")
+  }
 }
 
 object RemoteApiService {
@@ -25,7 +24,7 @@ object RemoteApiService {
   private implicit val system = ActorSystem(Behaviors.empty, Config.Akka.SystemName)
   private implicit val executionContext = system.executionContext
 
-  def call(objectId: String): IO[String] = Logger.info(s"Remote Url to be called ${Config.RemoteApi.Uri}$objectId") *>
+  def call(objectId: String): IO[String] = Log(s"Remote Url to be called ${Config.RemoteApi.Uri}$objectId") *>
     IO.fromFuture {
       IO {
         // A random chance of failure is introduced to model an error when calling the remote API.

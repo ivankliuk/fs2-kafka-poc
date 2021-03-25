@@ -24,28 +24,27 @@ object Main extends IOApp.Simple {
     numberOfPayloadMessages.fold(stream.repeat)(stream.repeatN)
   }
 
-  private val processConsumedRecord: CommittableConsumerRecord[IO, String, String] => IO[Option[CommittableOffset[IO]]] =
+  private val processConsumedRecord: CommittableConsumerRecord[IO, String, String] => IO[CommittableOffset[IO]] =
     ccr =>
       RemoteApiService.call(ccr.record.value).flatMap(value => PersistenceService.save(value, ccr.record.partition)) // flatMap
         .redeemWith(
-          throwable => Logger.error(s"Caught error during processing record ${ccr.record.show}): $throwable") *> IO.pure(None),
-          _ => IO(Some(ccr.offset))
+          throwable => Log(s"Caught error during processing record ${ccr.record.show}): $throwable") *> IO.raiseError(throwable),
+          _ => IO(ccr.offset)
         )
 
-  private val fanOutPipe: Pipe[IO, Stream[IO, CommittableConsumerRecord[IO, String, String]], Option[CommittableOffset[IO]]] =
-      _.map(_.parEvalMapUnordered(Config.Consumer.ConcurrentProcessors)(processConsumedRecord))
-      .parJoinUnbounded
-
-  private val successfulOperationsFilterPipe: Pipe[IO, Option[CommittableOffset[IO]], CommittableOffset[IO]] =
-    _.collect { case Some(i) => i }
+  private val fanOutPipe: Pipe[IO, Stream[IO, CommittableConsumerRecord[IO, String, String]], Stream[IO, Unit]] =
+    _.map { streamOfStreams =>
+      streamOfStreams.parEvalMapUnordered(Config.Consumer.ConcurrentProcessors)(processConsumedRecord)
+        // We commit each partition independently.
+        .through(commitBatchWithin(Config.Consumer.CommitOffsetsInBatchOf, Config.Consumer.CommitOffsetsInTimeWindow))
+    }
 
   private val consumer: Stream[IO, Unit] =
     KafkaConsumer.stream(Config.Consumer.Settings)
       .evalTap(_.subscribeTo(Config.Topic))
       .flatMap(_.partitionedStream)
       .through(fanOutPipe)
-      .through(successfulOperationsFilterPipe)
-      .through(commitBatchWithin(Config.Consumer.CommitOffsetsInBatchOf, Config.Consumer.CommitOffsetsInTimeWindow))
+      .parJoinUnbounded
 
   private val producer: Stream[IO, ProducerResult[Unit, String, String]] =
     generatePayload(Config.Producer.AmountMessagesToProduce)
@@ -56,7 +55,7 @@ object Main extends IOApp.Simple {
 
   override def run: IO[Unit] =
     (consumer.compile.drain &> producer.compile.drain).handleErrorWith {
-      throwable => Logger.error(s"Unexpected error occurred: ${throwable.getMessage}")
+      throwable => Log(s"Unexpected error occurred: ${throwable.getMessage}")
     }
 
 }

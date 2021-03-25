@@ -42,3 +42,8 @@ To run the application:
 ```bash
 $ sbt run
 ```
+
+TODO
+----
+
+* [Graceful shutdown](https://fd4s.github.io/fs2-kafka/docs/consumers#graceful-shutdown)
