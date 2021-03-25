@@ -28,7 +28,9 @@ object RemoteApiService {
   def call(objectId: String): IO[String] = Logger.info(s"Remote Url to be called ${Config.RemoteApi.Uri}$objectId") *>
     IO.fromFuture {
       IO {
-        Http().singleRequest(HttpRequest(uri = s"${Config.RemoteApi.Uri}$objectId"))
+        // A random chance of failure is introduced to model an error when calling the remote API.
+        val errorMixinObjectId = if (Random.nextInt(21) > 2) objectId else "non_existent_id"
+        Http().singleRequest(HttpRequest(uri = s"${Config.RemoteApi.Uri}$errorMixinObjectId"))
       }
     } >>= { // flatMap
     case HttpResponse(OK, _, entity, _) => IO.fromFuture {

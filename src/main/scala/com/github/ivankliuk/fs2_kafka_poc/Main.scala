@@ -32,9 +32,8 @@ object Main extends IOApp.Simple {
           _ => IO(Some(ccr.offset))
         )
 
-  private val fanOutPipe: Pipe[IO, KafkaConsumer[IO, String, String], Option[CommittableOffset[IO]]] =
-    _.flatMap(_.partitionedStream)
-      .map(_.parEvalMapUnordered(Config.Consumer.ConcurrentProcessors)(processConsumedRecord))
+  private val fanOutPipe: Pipe[IO, Stream[IO, CommittableConsumerRecord[IO, String, String]], Option[CommittableOffset[IO]]] =
+      _.map(_.parEvalMapUnordered(Config.Consumer.ConcurrentProcessors)(processConsumedRecord))
       .parJoinUnbounded
 
   private val successfulOperationsFilterPipe: Pipe[IO, Option[CommittableOffset[IO]], CommittableOffset[IO]] =
@@ -43,15 +42,17 @@ object Main extends IOApp.Simple {
   private val consumer: Stream[IO, Unit] =
     KafkaConsumer.stream(Config.Consumer.Settings)
       .evalTap(_.subscribeTo(Config.Topic))
+      .flatMap(_.partitionedStream)
       .through(fanOutPipe)
       .through(successfulOperationsFilterPipe)
       .through(commitBatchWithin(Config.Consumer.CommitOffsetsInBatchOf, Config.Consumer.CommitOffsetsInTimeWindow))
 
-  private val producer: Stream[IO, ProducerResult[Unit, String, String]] = generatePayload(Config.Producer.AmountMessagesToProduce)
-    .map { case (partition, payload) =>
-      ProducerRecords.one(ProducerRecord(Config.Topic, Config.Key, payload).withPartition(partition))
-    }
-    .through(KafkaProducer.pipe(Config.Producer.Settings))
+  private val producer: Stream[IO, ProducerResult[Unit, String, String]] =
+    generatePayload(Config.Producer.AmountMessagesToProduce)
+      .map { case (partition, payload) =>
+        ProducerRecords.one(ProducerRecord(Config.Topic, Config.Key, payload).withPartition(partition))
+      }
+      .through(KafkaProducer.pipe(Config.Producer.Settings))
 
   override def run: IO[Unit] =
     (consumer.compile.drain &> producer.compile.drain).handleErrorWith {
