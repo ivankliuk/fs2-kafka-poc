@@ -6,7 +6,7 @@ import fs2.kafka.{AutoOffsetReset, ConsumerSettings, ProducerSettings}
 import scala.concurrent.duration._
 
 object Config {
-  val BootstrapServers = "localhost:9092"
+  val BootstrapServers = "localhost:6001"
   val Topic = "default-topic"
   val Key = "default-key"
 

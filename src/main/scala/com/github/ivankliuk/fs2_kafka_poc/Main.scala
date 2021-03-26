@@ -1,10 +1,11 @@
 package com.github.ivankliuk.fs2_kafka_poc
 
 import cats.effect.{IO, IOApp}
-import cats.syntax.show._
 import cats.syntax.parallel._
-import fs2.{Pipe, Stream}
+import cats.syntax.show._
 import fs2.kafka._
+import fs2.{Pipe, Stream}
+import net.manub.embeddedkafka.EmbeddedKafka
 
 /**
  * fs2-kafka notes:
@@ -53,9 +54,13 @@ object Main extends IOApp.Simple {
       }
       .through(KafkaProducer.pipe(Config.Producer.Settings))
 
-  override def run: IO[Unit] =
-    (consumer.compile.drain &> producer.compile.drain).handleErrorWith {
-      throwable => Log(s"Unexpected error occurred: ${throwable.getMessage}")
-    }
+  override def run: IO[Unit] = {
+    IO {
+      EmbeddedKafka.start()
+      EmbeddedKafka.createCustomTopic(Config.Topic, partitions = 3)
+    } >> (consumer.compile.drain &> producer.compile.drain) >> IO(EmbeddedKafka.stop())
+  }.handleErrorWith {
+    throwable => Log(s"Unexpected error occurred: ${throwable.getMessage}")
+  }
 
 }
